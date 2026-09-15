@@ -9,6 +9,7 @@ SUPPORTED_COMPLAINT_TYPES = (
     "PLUMBING",
     "ELEVATOR"
 )
+
 SOURCE_FIELDS = (
     "unique_key",
     "created_date",
@@ -23,6 +24,7 @@ SOURCE_FIELDS = (
     "status",
     "resolution_action_updated_date"
 )
+
 
 def fetch_complaints(limit: int = 10) -> list[dict[str, Any]]:
     quoted_types = ", ".join(f"'{complaint_type}'" for complaint_type in SUPPORTED_COMPLAINT_TYPES)

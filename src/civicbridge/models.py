@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from datetime import datetime
 
+
 @dataclass(frozen=True)
 class Complaint:
     source_id: str
@@ -16,3 +17,13 @@ class Complaint:
     incident_zip: str | None = None
     bbl: str | None = None
     borough: str | None = None
+
+
+@dataclass(frozen=True)
+class Property:
+    property_id: str
+    name: str
+    address: str
+    borough: str
+
+    bbl: str | None = None

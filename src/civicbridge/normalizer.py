@@ -2,6 +2,7 @@ from typing import Any
 from datetime import datetime
 from .models import Complaint
 
+
 def parse_datetime(value: str | None) -> datetime | None:
     if not value:
         return None
@@ -32,6 +33,6 @@ def normalize_complaint(raw: dict[str, Any]) -> Complaint:
 
 def normalize_complaints(raw_complaints: list[dict[str, Any]]) -> list[Complaint]:
     return [
-        normalize_complaint(raw_complaint) 
+        normalize_complaint(raw_complaint)
         for raw_complaint in raw_complaints
     ]
