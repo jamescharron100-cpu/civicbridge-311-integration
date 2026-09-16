@@ -1,6 +1,5 @@
 from .models import Property
 
-
 PROPERTIES: list[Property] = [
     Property(
         property_id="CB-001",

@@ -5,6 +5,7 @@ from src.civicbridge.mapper import map_complaint
 from src.civicbridge.models import Complaint
 from src.civicbridge.properties import PROPERTIES
 
+
 class MapperTests(TestCase):
     def test_maps_heat_complaint(self):
         complaint = Complaint(

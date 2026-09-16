@@ -1,5 +1,4 @@
-from .models import Complaint, Property, MaintenanceRequest
-
+from .models import Complaint, MaintenanceRequest, Property
 
 CATEGORY_MAP = {
     "HEAT/HOT WATER": "HEATING",

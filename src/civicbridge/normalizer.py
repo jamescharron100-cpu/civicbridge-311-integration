@@ -1,5 +1,6 @@
-from typing import Any
 from datetime import datetime
+from typing import Any
+
 from .models import Complaint
 
 
