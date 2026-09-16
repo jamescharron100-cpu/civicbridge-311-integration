@@ -27,3 +27,15 @@ class Property:
     borough: str
 
     bbl: str | None = None
+
+
+@dataclass(frozen=True)
+class MaintenanceRequest:
+    external_id: str
+    property_id: str
+    category: str
+    priority: str
+    status: str
+    description: str
+    reported_at: datetime
+    source_updated_at: datetime
