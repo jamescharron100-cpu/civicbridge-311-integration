@@ -3,7 +3,7 @@ from datetime import datetime
 from unittest import TestCase
 
 from src.civicbridge.models import MaintenanceRequest
-from src.civicbridge.soap_client import (CIVICBRIDGE_NS, SOAP_NS, build_soap_envelope)
+from src.civicbridge.soap_client import (CIVICBRIDGE_NS, SOAP_NS, build_soap_envelope, parse_soap_response)
 
 
 class SoapClientTests(TestCase):
@@ -42,3 +42,69 @@ class SoapClientTests(TestCase):
 
         self.assertEqual(operation.findtext(f"{{{CIVICBRIDGE_NS}}}ReportedAt"), request.reported_at.isoformat())
         self.assertEqual(operation.findtext(f"{{{CIVICBRIDGE_NS}}}SourceUpdatedAt"), request.source_updated_at.isoformat())
+
+
+    def test_parses_created_response(self):
+        xml_bytes = b"""
+        <soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/"
+                       xmlns:cb="urn:civicbridge:maintenance">
+            <soap:Body>
+                <cb:UpsertMaintenanceRequestResponse>
+                    <cb:ExternalId>TEST-001</cb:ExternalId>
+                    <cb:Result>CREATED</cb:Result>
+                </cb:UpsertMaintenanceRequestResponse>
+            </soap:Body>
+        </soap:Envelope>
+        """
+
+        self.assertEqual(parse_soap_response(xml_bytes), "CREATED")
+
+
+    def test_parses_updated_response(self):
+        xml_bytes = b"""
+        <soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/"
+                        xmlns:cb="urn:civicbridge:maintenance">
+            <soap:Body>
+                <cb:UpsertMaintenanceRequestResponse>
+                    <cb:ExternalId>TEST-001</cb:ExternalId>
+                    <cb:Result>UPDATED</cb:Result>
+                </cb:UpsertMaintenanceRequestResponse>
+            </soap:Body>
+        </soap:Envelope>
+        """
+
+        self.assertEqual(parse_soap_response(xml_bytes), "UPDATED")
+
+
+    def test_raises_for_soap_fault(self):
+        xml_bytes = b"""
+        <soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/"
+                        xmlns:cb="urn:civicbridge:maintenance">
+            <soap:Body>
+                <soap:Fault>
+                    <faultcode>soap:Client</faultcode>
+                    <faultstring>Unknown property ID</faultstring>
+                </soap:Fault>
+            </soap:Body>
+        </soap:Envelope>
+        """
+
+        with self.assertRaisesRegex(ValueError, "Unknown property ID"):
+            parse_soap_response(xml_bytes)
+
+
+    def test_rejects_unexpected_result(self):
+        xml_bytes = b"""
+        <soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/"
+                        xmlns:cb="urn:civicbridge:maintenance">
+            <soap:Body>
+                <cb:UpsertMaintenanceRequestResponse>
+                    <cb:ExternalId>TEST-001</cb:ExternalId>
+                    <cb:Result>PENDING</cb:Result>
+                </cb:UpsertMaintenanceRequestResponse>
+            </soap:Body>
+        </soap:Envelope>
+        """
+
+        with self.assertRaisesRegex(ValueError, "Unexpected result: PENDING"):
+            parse_soap_response(xml_bytes)

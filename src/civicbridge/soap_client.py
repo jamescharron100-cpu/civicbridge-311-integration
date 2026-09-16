@@ -25,3 +25,27 @@ def build_soap_envelope(request: MaintenanceRequest) -> bytes:
     ET.SubElement(operation, f"{{{CIVICBRIDGE_NS}}}SourceUpdatedAt").text = request.source_updated_at.isoformat()
 
     return ET.tostring(envelope, encoding="utf-8", xml_declaration=True)
+
+
+def parse_soap_response(xml_bytes: bytes) -> str:
+    root = ET.fromstring(xml_bytes)
+    if root.tag != f"{{{SOAP_NS}}}Envelope":
+        raise ValueError("Response is not a SOAP envelope")
+
+    body = root.find(f"{{{SOAP_NS}}}Body")
+    if body is None:
+        raise ValueError("SOAP response is missing its Body")
+
+    fault = body.find(f"{{{SOAP_NS}}}Fault")
+    if fault is not None:
+        raise ValueError(fault.findtext("faultstring") or "Unknown SOAP fault")
+
+    response = body.find(f"{{{CIVICBRIDGE_NS}}}UpsertMaintenanceRequestResponse")
+    if response is None:
+        raise ValueError("Operation response is missing")
+
+    result = response.findtext(f"{{{CIVICBRIDGE_NS}}}Result")
+    if result not in ("CREATED", "UPDATED"):
+        raise ValueError(f"Unexpected result: {result}")
+
+    return result
