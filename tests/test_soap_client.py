@@ -1,9 +1,10 @@
 import xml.etree.ElementTree as ET
 from datetime import datetime
 from unittest import TestCase
+from unittest.mock import Mock, patch
 
 from src.civicbridge.models import MaintenanceRequest
-from src.civicbridge.soap_client import (CIVICBRIDGE_NS, SOAP_NS, build_soap_envelope, parse_soap_response)
+from src.civicbridge.soap_client import (CIVICBRIDGE_NS, SOAP_NS, build_soap_envelope, parse_soap_response, send_maintenance_request)
 
 
 class SoapClientTests(TestCase):
@@ -108,3 +109,91 @@ class SoapClientTests(TestCase):
 
         with self.assertRaisesRegex(ValueError, "Unexpected result: PENDING"):
             parse_soap_response(xml_bytes)
+
+
+    def test_sends_maintenance_request(self):
+        request = MaintenanceRequest(
+            external_id="TEST-002",
+            property_id="CB-001",
+            category="HEATING",
+            priority="HIGH",
+            status="OPEN",
+            description="Heat & hot water",
+            reported_at=datetime(2026, 9, 16),
+            source_updated_at=datetime(2026, 9, 16)
+        )
+
+        xml_bytes = b"""
+        <soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/"
+                       xmlns:cb="urn:civicbridge:maintenance">
+            <soap:Body>
+                <cb:UpsertMaintenanceRequestResponse>
+                    <cb:ExternalId>TEST-001</cb:ExternalId>
+                    <cb:Result>CREATED</cb:Result>
+                </cb:UpsertMaintenanceRequestResponse>
+            </soap:Body>
+        </soap:Envelope>
+        """
+
+        mock_response = Mock()
+        mock_response.content = xml_bytes
+
+        with patch(
+            "src.civicbridge.soap_client.requests.post",
+            return_value=mock_response,
+        ) as mock_post:
+            result = send_maintenance_request(
+                request, "http://localhost:8000/soap"
+            )
+
+        self.assertEqual(result, "CREATED")
+
+        mock_post.assert_called_once_with(
+            "http://localhost:8000/soap",
+            data=build_soap_envelope(request),
+            headers={
+                "Content-Type": "text/xml; charset=utf-8",
+                "SOAPAction": '"urn:civicbridge:maintenance:UpsertMaintenanceRequest"',
+            },
+            timeout=10,
+        )
+        mock_response.raise_for_status.assert_called_once_with()
+
+
+    def test_send_raises_for_soap_fault(self):
+        request = MaintenanceRequest(
+            external_id="TEST-003",
+            property_id="CB-001",
+            category="HEATING",
+            priority="HIGH",
+            status="OPEN",
+            description="Heat & hot water",
+            reported_at=datetime(2026, 9, 16),
+            source_updated_at=datetime(2026, 9, 16)
+        )
+
+        xml_bytes = b"""
+        <soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/"
+                        xmlns:cb="urn:civicbridge:maintenance">
+            <soap:Body>
+                <soap:Fault>
+                    <faultcode>soap:Client</faultcode>
+                    <faultstring>Unknown property ID</faultstring>
+                </soap:Fault>
+            </soap:Body>
+        </soap:Envelope>
+        """
+
+        mock_response = Mock()
+        mock_response.content = xml_bytes
+
+        with patch(
+            "src.civicbridge.soap_client.requests.post",
+            return_value=mock_response,
+        ):
+            with self.assertRaisesRegex(ValueError, "Unknown property ID"):
+                send_maintenance_request(
+                    request, "http://localhost:8000/soap"
+                )
+
+        mock_response.raise_for_status.assert_not_called()

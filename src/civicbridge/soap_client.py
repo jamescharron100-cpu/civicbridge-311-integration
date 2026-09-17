@@ -1,3 +1,4 @@
+import requests
 import xml.etree.ElementTree as ET
 
 from .models import MaintenanceRequest
@@ -47,5 +48,21 @@ def parse_soap_response(xml_bytes: bytes) -> str:
     result = response.findtext(f"{{{CIVICBRIDGE_NS}}}Result")
     if result not in ("CREATED", "UPDATED"):
         raise ValueError(f"Unexpected result: {result}")
+
+    return result
+
+
+def send_maintenance_request(request: MaintenanceRequest, endpoint_url: str) -> str:
+    xml_bytes = build_soap_envelope(request)
+
+    headers = {
+        "Content-Type": "text/xml; charset=utf-8",
+        "SOAPAction": '"urn:civicbridge:maintenance:UpsertMaintenanceRequest"'
+    }
+
+    response = requests.post(endpoint_url, data=xml_bytes, headers=headers, timeout=10)
+
+    result = parse_soap_response(response.content)
+    response.raise_for_status()
 
     return result
