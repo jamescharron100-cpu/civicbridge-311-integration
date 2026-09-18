@@ -1,3 +1,8 @@
+import sqlite3
+from dataclasses import replace
+from pathlib import Path
+from tempfile import TemporaryDirectory
+
 from datetime import datetime
 from unittest import TestCase
 from threading import Thread
@@ -5,7 +10,7 @@ from threading import Thread
 
 from src.civicbridge.models import MaintenanceRequest
 from src.civicbridge.soap_client import build_soap_envelope, parse_soap_response, send_maintenance_request
-from src.civicbridge.soap_server import parse_maintenance_request, build_soap_response, build_soap_fault, upsert_maintenance_request, SoapHTTPServer, SoapRequestHandler
+from src.civicbridge.soap_server import parse_maintenance_request, build_soap_response, build_soap_fault, SoapHTTPServer, SoapRequestHandler
 
 
 class SoapServerTests(TestCase):
@@ -70,31 +75,7 @@ class SoapServerTests(TestCase):
             parse_soap_response(xml_bytes)
 
 
-    def test_creates_and_updates_maintenance_request(self):
-        cases = {}
-        fields = {
-            "ExternalId": "TEST-001",
-            "Description": "Heat & hot water",
-        }
-
-        result = upsert_maintenance_request(fields, cases)
-
-        self.assertEqual(result, "CREATED")
-        self.assertEqual(cases["TEST-001"], fields)
-
-        fields["Description"] = "Updated heating complaint"
-        self.assertEqual(
-            cases["TEST-001"]["Description"], "Heat & hot water"
-        )
-
-        result = upsert_maintenance_request(fields, cases)
-
-        self.assertEqual(result, "UPDATED")
-        self.assertEqual(cases["TEST-001"], fields)
-        self.assertEqual(len(cases), 1)
-
-
-    def test_creates_and_updates_over_http(self):
+    def test_persists_case_across_server_restart(self):
         request = MaintenanceRequest(
             external_id="HTTP-TEST-001",
             property_id="CB-001",
@@ -106,24 +87,57 @@ class SoapServerTests(TestCase):
             source_updated_at=datetime(2026, 9, 16),
         )
 
-        with SoapHTTPServer(("127.0.0.1", 0), SoapRequestHandler) as server:
-            thread = Thread(target=server.serve_forever, daemon=True)
-            thread.start()
-            endpoint = f"http://127.0.0.1:{server.server_port}/soap"
+        with TemporaryDirectory() as temp_dir:
+            db_path = str(Path(temp_dir) / "cases.db")
 
+            for expected_result in ("CREATED", "UPDATED"):
+                with SoapHTTPServer(
+                    ("127.0.0.1", 0),
+                    SoapRequestHandler,
+                    db_path,
+                ) as server:
+                    thread = Thread(
+                        target=server.serve_forever,
+                        daemon=True,
+                    )
+                    thread.start()
+                    endpoint = (
+                        f"http://127.0.0.1:{server.server_port}/soap"
+                    )
+
+                    try:
+                        self.assertEqual(
+                            send_maintenance_request(request, endpoint),
+                            expected_result,
+                        )
+                    finally:
+                        server.shutdown()
+                        thread.join(timeout=5)
+
+                request = replace(
+                    request,
+                    description="Updated heating complaint",
+                    source_updated_at=datetime(2026, 9, 18),
+                )
+
+            conn = sqlite3.connect(db_path)
             try:
-                self.assertEqual(
-                    send_maintenance_request(request, endpoint), "CREATED"
-                )
-                self.assertEqual(
-                    send_maintenance_request(request, endpoint), "UPDATED"
-                )
+                rows = conn.execute(
+                    """
+                    SELECT external_id, description, source_updated_at
+                    FROM maintenance_cases
+                    """
+                ).fetchall()
             finally:
-                server.shutdown()
-                thread.join(timeout=5)
+                conn.close()
 
-            self.assertEqual(len(server.cases), 1)
             self.assertEqual(
-                server.cases["HTTP-TEST-001"]["Description"],
-                "Heat & hot water",
+                rows,
+                [
+                    (
+                        "HTTP-TEST-001",
+                        "Updated heating complaint",
+                        "2026-09-18T00:00:00",
+                    )
+                ],
             )

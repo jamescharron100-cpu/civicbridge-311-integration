@@ -1,6 +1,7 @@
 import xml.etree.ElementTree as ET
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from .soap_client import SOAP_NS, CIVICBRIDGE_NS
+from .case_store import initialize_database, upsert_case
 
 
 def parse_maintenance_request(xml_bytes: bytes) -> dict[str, str]:
@@ -51,17 +52,11 @@ def build_soap_fault(message: str) -> bytes:
     return ET.tostring(envelope, encoding="utf-8", xml_declaration=True)
 
 
-def upsert_maintenance_request(fields: dict[str, str], cases: dict[str, dict[str, str]]) -> str:
-    external_id = fields["ExternalId"]
-    result = "UPDATED" if external_id in cases else "CREATED"
-    cases[external_id] = fields.copy()
-    return result
-
-
 class SoapHTTPServer(HTTPServer):
-    def __init__(self, server_address, handler_class):
+    def __init__(self, server_address, handler_class, db_path: str):
+        self.db_path = db_path
+        initialize_database(self.db_path)
         super().__init__(server_address, handler_class)
-        self.cases: dict[str, dict[str, str]] = {}
 
 
 class SoapRequestHandler(BaseHTTPRequestHandler):
@@ -109,13 +104,17 @@ class SoapRequestHandler(BaseHTTPRequestHandler):
             return
 
         assert isinstance(self.server, SoapHTTPServer)
-        result = upsert_maintenance_request(fields, self.server.cases)
+        result = upsert_case(self.server.db_path, fields)
 
         self.send_xml_response(200, build_soap_response(fields["ExternalId"], result))
 
 
 def run_server() -> None:
-    with SoapHTTPServer(("127.0.0.1", 8000), SoapRequestHandler) as server:
+    with SoapHTTPServer(
+        ("127.0.0.1", 8000),
+        SoapRequestHandler,
+        "civicbridge_cases.db",
+    ) as server:
         print("SOAP server listening on http://127.0.0.1:8000/soap")
         server.serve_forever()
 
