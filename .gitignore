@@ -3,3 +3,5 @@ __pycache__/
 *.pyc
 civicbridge_cases.db
 civicbridge_cases.db-*
+civicbridge_sync.db
+civicbridge_sync.db-*

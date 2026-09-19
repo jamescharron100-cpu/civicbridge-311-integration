@@ -1,9 +1,12 @@
 from datetime import datetime
+from pathlib import Path
+from tempfile import TemporaryDirectory
 from unittest import TestCase
 from unittest.mock import patch
 
 from src.civicbridge.models import MaintenanceRequest
 from src.civicbridge.runner import run_integration
+from src.civicbridge.sync_store import should_skip_record
 
 
 def raw_complaint(source_id, bbl):
@@ -19,7 +22,14 @@ def raw_complaint(source_id, bbl):
 
 
 class RunnerTests(TestCase):
-    def test_counts_results_and_skips_unmatched_records(self):
+    def setUp(self):
+        self.temp_dir = TemporaryDirectory()
+        self.addCleanup(self.temp_dir.cleanup)
+        self.sync_db_path = str(
+            Path(self.temp_dir.name) / "sync.db"
+        )
+
+    def test_counts_results_and_skips_successful_records_on_next_run(self):
         records = [
             raw_complaint("UNMATCHED-001", "1000000000"),
             raw_complaint("MATCHED-001", "2037710066"),
@@ -37,10 +47,42 @@ class RunnerTests(TestCase):
                 side_effect=["CREATED", "UPDATED"],
             ) as mock_send,
         ):
-            summary = run_integration(endpoint, limit=3, bbl="2037710066")
+            first_summary = run_integration(
+                endpoint,
+                self.sync_db_path,
+                limit=3,
+                bbl="2037710066",
+            )
+            second_summary = run_integration(
+                endpoint,
+                self.sync_db_path,
+                limit=3,
+                bbl="2037710066",
+            )
 
-        self.assertEqual(summary, {"fetched": 3, "unmatched": 1, "created": 1, "updated": 1})
-        mock_fetch.assert_called_once_with(3, bbl="2037710066")
+        self.assertEqual(
+            first_summary,
+            {
+                "fetched": 3,
+                "unmatched": 1,
+                "created": 1,
+                "updated": 1,
+                "skipped": 0,
+            },
+        )
+        self.assertEqual(
+            second_summary,
+            {
+                "fetched": 3,
+                "unmatched": 1,
+                "created": 0,
+                "updated": 0,
+                "skipped": 2,
+            },
+        )
+
+        self.assertEqual(mock_fetch.call_count, 2)
+        mock_fetch.assert_called_with(3, bbl="2037710066")
         self.assertEqual(mock_send.call_count, 2)
 
         first_request, first_endpoint = mock_send.call_args_list[0].args
@@ -58,7 +100,43 @@ class RunnerTests(TestCase):
                 source_updated_at=datetime(2026, 9, 16),
             ),
         )
-        self.assertEqual(mock_send.call_args_list[1].args[0].external_id, "MATCHED-002")
+        self.assertEqual(
+            mock_send.call_args_list[1].args[0].external_id,
+            "MATCHED-002",
+        )
+
+    def test_failed_send_is_not_recorded_as_successful(self):
+        record = raw_complaint(
+            "MATCHED-003",
+            "2037710066",
+        )
+
+        with (
+            patch(
+                "src.civicbridge.runner.fetch_complaints",
+                return_value=[record],
+            ),
+            patch(
+                "src.civicbridge.runner.send_maintenance_request",
+                side_effect=RuntimeError("SOAP unavailable"),
+            ),
+        ):
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "SOAP unavailable",
+            ):
+                run_integration(
+                    "http://127.0.0.1:8000/soap",
+                    self.sync_db_path,
+                )
+
+        self.assertFalse(
+            should_skip_record(
+                self.sync_db_path,
+                "MATCHED-003",
+                datetime(2026, 9, 16),
+            )
+        )
 
     def test_empty_batch_returns_zero_counts(self):
         with (
@@ -67,10 +145,22 @@ class RunnerTests(TestCase):
                 return_value=[],
             ),
             patch(
-                "src.civicbridge.runner.send_maintenance_request"
+                "src.civicbridge.runner.send_maintenance_request",
             ) as mock_send,
         ):
-            summary = run_integration("http://127.0.0.1:8000/soap")
+            summary = run_integration(
+                "http://127.0.0.1:8000/soap",
+                self.sync_db_path,
+            )
 
-        self.assertEqual(summary, {"fetched": 0, "unmatched": 0, "created": 0, "updated": 0})
+        self.assertEqual(
+            summary,
+            {
+                "fetched": 0,
+                "unmatched": 0,
+                "created": 0,
+                "updated": 0,
+                "skipped": 0,
+            },
+        )
         mock_send.assert_not_called()
