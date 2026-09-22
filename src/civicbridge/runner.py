@@ -4,43 +4,51 @@ from .matcher import find_matching_property
 from .properties import PROPERTIES
 from .mapper import map_complaint
 from .soap_client import send_maintenance_request
-from .sync_store import initialize_sync_database, record_success, should_skip_record
+from .sync_store import initialize_sync_database, record_success, should_skip_record, start_run, finish_run
 
 
 def run_integration(endpoint_url: str, sync_db_path: str, limit: int = 10, bbl: str | None = None) -> dict[str, int]:
     initialize_sync_database(sync_db_path)
-    raw_complaints = fetch_complaints(limit, bbl=bbl)
 
     summary = {
-        "fetched": len(raw_complaints),
+        "fetched": 0,
         "unmatched": 0,
         "created": 0,
         "updated": 0,
         "skipped": 0,
     }
 
-    for raw_complaint in raw_complaints:
-        complaint = normalize_complaint(raw_complaint)
-        if should_skip_record(sync_db_path, complaint.source_id, complaint.source_updated_at):
-            summary["skipped"] += 1
-            continue
+    run_id = start_run(sync_db_path)
+    try:
+        raw_complaints = fetch_complaints(limit, bbl=bbl)
+        summary["fetched"] = len(raw_complaints)
 
-        matched_property = find_matching_property(complaint, PROPERTIES)
-        if matched_property is None:
-            summary["unmatched"] += 1
-            continue
+        for raw_complaint in raw_complaints:
+            complaint = normalize_complaint(raw_complaint)
+            if should_skip_record(sync_db_path, complaint.source_id, complaint.source_updated_at):
+                summary["skipped"] += 1
+                continue
 
-        request = map_complaint(complaint, matched_property)
+            matched_property = find_matching_property(complaint, PROPERTIES)
+            if matched_property is None:
+                summary["unmatched"] += 1
+                continue
 
-        result = send_maintenance_request(request, endpoint_url)
-        if result == "CREATED":
-            summary["created"] += 1
-        else:
-            summary["updated"] += 1
+            request = map_complaint(complaint, matched_property)
 
-        record_success(sync_db_path, complaint.source_id, complaint.source_updated_at, result)
+            result = send_maintenance_request(request, endpoint_url)
+            if result == "CREATED":
+                summary["created"] += 1
+            else:
+                summary["updated"] += 1
 
-    return summary
+            record_success(sync_db_path, complaint.source_id, complaint.source_updated_at, result)
+
+        finish_run(sync_db_path, run_id, "SUCCEEDED", summary)
+        return summary
+    except Exception as error:
+        finish_run(sync_db_path, run_id, "FAILED", summary, str(error))
+        raise
 
 
 def main() -> None:
