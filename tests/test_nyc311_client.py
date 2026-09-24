@@ -1,5 +1,6 @@
 from unittest import TestCase
 from unittest.mock import call, patch
+from datetime import datetime, timezone
 
 from src.civicbridge.nyc311_client import (BASE_URL, SOURCE_FIELDS, fetch_complaints, fetch_complaint_pages)
 
@@ -18,7 +19,7 @@ class NYC311ClientTests(TestCase):
             BASE_URL,
             params={
                 "$limit": 5,
-                "$order": "created_date DESC, unique_key DESC",
+                "$order": "coalesce(resolution_action_updated_date, closed_date, created_date) DESC, unique_key DESC",
                 "$where": (
                     "complaint_type IN "
                     "('HEAT/HOT WATER', 'PLUMBING', 'ELEVATOR')"
@@ -66,7 +67,7 @@ class NYC311ClientTests(TestCase):
         self.assertEqual(params["$offset"], 50)
         self.assertEqual(
             params["$order"],
-            "created_date DESC, unique_key DESC",
+            "coalesce(resolution_action_updated_date, closed_date, created_date) DESC, unique_key DESC",
         )
 
     @patch("src.civicbridge.nyc311_client.requests.get")
@@ -197,3 +198,47 @@ class NYC311ClientTests(TestCase):
                     )
 
         mock_fetch.assert_not_called()
+
+
+    @patch("src.civicbridge.nyc311_client.requests.get")
+    def test_filters_for_records_updated_after_checkpoint(self, mock_get):
+        mock_get.return_value.json.return_value = []
+
+        fetch_complaints(
+            updated_after=datetime(
+                2026,
+                9,
+                24,
+                17,
+                30,
+                tzinfo=timezone.utc,
+            )
+        )
+
+        where_clause = mock_get.call_args.kwargs["params"]["$where"]
+
+        self.assertEqual(
+            where_clause,
+            "complaint_type IN "
+            "('HEAT/HOT WATER', 'PLUMBING', 'ELEVATOR')"
+            " AND coalesce("
+            "resolution_action_updated_date, "
+            "closed_date, "
+            "created_date"
+            ") > '2026-09-24T13:30:00'",
+        )
+
+    @patch("src.civicbridge.nyc311_client.requests.get")
+    def test_rejects_naive_updated_after_before_http_request(
+        self,
+        mock_get,
+    ):
+        with self.assertRaisesRegex(
+            ValueError,
+            "Updated after must include timezone information",
+        ):
+            fetch_complaints(
+                updated_after=datetime(2026, 9, 24, 13, 30)
+            )
+
+        mock_get.assert_not_called()

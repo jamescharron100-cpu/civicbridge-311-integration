@@ -1,5 +1,7 @@
 from typing import Any
 import requests
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 
 BASE_URL = "https://data.cityofnewyork.us/resource/erm2-nwe9.json"
@@ -26,7 +28,13 @@ SOURCE_FIELDS = (
 )
 
 
-def fetch_complaints(limit: int = 10, bbl: str | None = None, offset: int = 0) -> list[dict[str, Any]]:
+def fetch_complaints(
+    limit: int = 10,
+    bbl: str | None = None,
+    offset: int = 0,
+    updated_after: datetime | None = None,
+) -> list[dict[str, Any]]:
+    
     quoted_types = ", ".join(f"'{complaint_type}'" for complaint_type in SUPPORTED_COMPLAINT_TYPES)
     where_clause = f"complaint_type IN ({quoted_types})"
 
@@ -40,10 +48,27 @@ def fetch_complaints(limit: int = 10, bbl: str | None = None, offset: int = 0) -
         raise ValueError("Limit must be greater than zero")
     if offset < 0:
         raise ValueError("Offset cannot be negative")
+    
+    if updated_after is not None:
+        if updated_after.tzinfo is None or updated_after.utcoffset() is None:
+            raise ValueError("Updated after must include timezone information")
+        source_updated_after = (
+            updated_after.astimezone(ZoneInfo("America/New_York"))
+            .replace(tzinfo=None)
+            .isoformat(timespec="seconds")
+        )
+
+        where_clause += (
+            " AND coalesce("
+            "resolution_action_updated_date, "
+            "closed_date, "
+            "created_date"
+            f") > '{source_updated_after}'"
+        )
 
     params = {
         "$limit": limit,
-        "$order": "created_date DESC, unique_key DESC",
+        "$order": "coalesce(resolution_action_updated_date, closed_date, created_date) DESC, unique_key DESC",
         "$where": where_clause,
         "$select": ", ".join(SOURCE_FIELDS),
         "$offset": offset,
