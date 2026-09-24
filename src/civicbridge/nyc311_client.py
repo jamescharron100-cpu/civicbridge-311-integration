@@ -85,6 +85,7 @@ def fetch_complaint_pages(
     page_size: int = 100,
     max_pages: int = 5,
     bbl: str | None = None,
+    updated_after: datetime | None = None
 ) -> list[dict[str, Any]]:
 
     if page_size <= 0:
@@ -95,7 +96,7 @@ def fetch_complaint_pages(
     complaints = []
     for page_number in range(max_pages):
         offset = page_number * page_size
-        page = fetch_complaints(limit=page_size, bbl=bbl, offset=offset)
+        page = fetch_complaints(limit=page_size, bbl=bbl, offset=offset, updated_after=updated_after)
         complaints.extend(page)
 
         if len(page) < page_size:

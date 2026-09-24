@@ -113,10 +113,19 @@ class NYC311ClientTests(TestCase):
             final_page,
         ]
 
+        checkpoint = datetime(
+            2026,
+            9,
+            24,
+            17,
+            30,
+            tzinfo=timezone.utc,
+        )
         result = fetch_complaint_pages(
             page_size=2,
             max_pages=5,
             bbl="2037710066",
+            updated_after=checkpoint
         )
 
         self.assertEqual(
@@ -130,16 +139,19 @@ class NYC311ClientTests(TestCase):
                     limit=2,
                     bbl="2037710066",
                     offset=0,
+                    updated_after=checkpoint,
                 ),
                 call(
                     limit=2,
                     bbl="2037710066",
                     offset=2,
+                    updated_after=checkpoint,
                 ),
                 call(
                     limit=2,
                     bbl="2037710066",
                     offset=4,
+                    updated_after=checkpoint,
                 ),
             ],
         )
@@ -167,8 +179,8 @@ class NYC311ClientTests(TestCase):
         self.assertEqual(
             mock_fetch.call_args_list,
             [
-                call(limit=2, bbl=None, offset=0),
-                call(limit=2, bbl=None, offset=2),
+                call(limit=2, bbl=None, offset=0, updated_after=None),
+                call(limit=2, bbl=None, offset=2, updated_after=None),
             ],
         )
 
