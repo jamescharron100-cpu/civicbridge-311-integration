@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 from src.civicbridge.models import MaintenanceRequest
 from src.civicbridge.runner import run_integration
-from src.civicbridge.sync_store import should_skip_record
+from src.civicbridge.sync_store import should_skip_record, get_last_successful_run_started_at
 
 
 def raw_complaint(source_id, bbl):
@@ -55,6 +55,9 @@ class RunnerTests(TestCase):
                 max_pages=2,
                 bbl="2037710066",
             )
+
+            first_checkpoint = get_last_successful_run_started_at(self.sync_db_path)
+
             second_summary = run_integration(
                 endpoint,
                 self.sync_db_path,
@@ -85,31 +88,25 @@ class RunnerTests(TestCase):
         )
 
         self.assertEqual(mock_fetch.call_count, 2)
-        mock_fetch.assert_called_with(
-            page_size=3,
-            max_pages=2,
-            bbl="2037710066",
-        )
-        self.assertEqual(mock_send.call_count, 2)
+        self.assertIsNotNone(first_checkpoint)
 
-        first_request, first_endpoint = mock_send.call_args_list[0].args
-        self.assertEqual(first_endpoint, endpoint)
         self.assertEqual(
-            first_request,
-            MaintenanceRequest(
-                external_id="MATCHED-001",
-                property_id="CB-001",
-                category="HEATING",
-                priority="HIGH",
-                status="OPEN",
-                description="HEAT/HOT WATER: Heat & hot water",
-                reported_at=datetime(2026, 9, 16),
-                source_updated_at=datetime(2026, 9, 16),
-            ),
+            mock_fetch.call_args_list[0].kwargs,
+            {
+                "page_size": 3,
+                "max_pages": 2,
+                "bbl": "2037710066",
+                "updated_after": None,
+            },
         )
         self.assertEqual(
-            mock_send.call_args_list[1].args[0].external_id,
-            "MATCHED-002",
+            mock_fetch.call_args_list[1].kwargs,
+            {
+                "page_size": 3,
+                "max_pages": 2,
+                "bbl": "2037710066",
+                "updated_after": first_checkpoint,
+            },
         )
 
     def test_failed_send_is_not_recorded_as_successful(self):

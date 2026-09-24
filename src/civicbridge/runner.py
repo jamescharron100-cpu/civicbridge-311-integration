@@ -4,7 +4,7 @@ from .matcher import find_matching_property
 from .properties import PROPERTIES
 from .mapper import map_complaint
 from .soap_client import send_maintenance_request
-from .sync_store import initialize_sync_database, record_success, should_skip_record, start_run, finish_run
+from .sync_store import initialize_sync_database, record_success, should_skip_record, start_run, finish_run, get_last_successful_run_started_at
 
 
 def run_integration(
@@ -15,6 +15,7 @@ def run_integration(
     bbl: str | None = None,
 ) -> dict[str, int]:
     initialize_sync_database(sync_db_path)
+    updated_after = get_last_successful_run_started_at(sync_db_path)
 
     summary = {
         "fetched": 0,
@@ -26,7 +27,7 @@ def run_integration(
 
     run_id = start_run(sync_db_path)
     try:
-        raw_complaints = fetch_complaint_pages(page_size=page_size, max_pages=max_pages, bbl=bbl)
+        raw_complaints = fetch_complaint_pages(page_size=page_size, max_pages=max_pages, bbl=bbl, updated_after=updated_after)
         summary["fetched"] = len(raw_complaints)
 
         for raw_complaint in raw_complaints:
