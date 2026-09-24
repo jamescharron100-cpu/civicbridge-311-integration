@@ -10,6 +10,7 @@ from src.civicbridge.sync_store import (
     should_skip_record,
     start_run,
     finish_run,
+    get_last_successful_run_started_at,
 )
 
 
@@ -246,3 +247,34 @@ class SyncStoreTests(TestCase):
                 "FAILED",
                 summary,
             )
+
+
+    def test_last_successful_run_returns_none_when_no_success_exists(self):
+        self.assertIsNone(
+            get_last_successful_run_started_at(self.db_path)
+        )
+
+    def test_last_successful_run_ignores_newer_failed_run(self):
+        conn = sqlite3.connect(self.db_path)
+        try:
+            conn.executemany(
+                """
+                INSERT INTO integration_runs (started_at, status)
+                VALUES (?, ?)
+                """,
+                [
+                    ("2026-09-24T10:00:00+00:00", "SUCCEEDED"),
+                    ("2026-09-24T11:00:00+00:00", "SUCCEEDED"),
+                    ("2026-09-24T12:00:00+00:00", "FAILED"),
+                ],
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+        result = get_last_successful_run_started_at(self.db_path)
+
+        self.assertEqual(
+            result,
+            datetime.fromisoformat("2026-09-24T11:00:00+00:00"),
+        )

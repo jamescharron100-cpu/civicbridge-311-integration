@@ -155,3 +155,26 @@ def finish_run(
     finally:
         conn.close()
 
+
+def get_last_successful_run_started_at(db_path: str) -> datetime | None:
+    conn = sqlite3.connect(db_path)
+
+    try:
+        row = conn.execute(
+            """
+            SELECT started_at
+            FROM integration_runs
+            WHERE status = ?
+            ORDER BY run_id DESC
+            LIMIT 1
+            """,
+            ("SUCCEEDED",)
+        ).fetchone()
+
+        if row is None:
+            return None
+
+        return datetime.fromisoformat(row[0])
+
+    finally:
+        conn.close()
