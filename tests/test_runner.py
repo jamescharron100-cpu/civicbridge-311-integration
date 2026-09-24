@@ -40,7 +40,7 @@ class RunnerTests(TestCase):
 
         with (
             patch(
-                "src.civicbridge.runner.fetch_complaints",
+                "src.civicbridge.runner.fetch_complaint_pages",
                 return_value=records,
             ) as mock_fetch,
             patch(
@@ -51,13 +51,15 @@ class RunnerTests(TestCase):
             first_summary = run_integration(
                 endpoint,
                 self.sync_db_path,
-                limit=3,
+                page_size=3,
+                max_pages=2,
                 bbl="2037710066",
             )
             second_summary = run_integration(
                 endpoint,
                 self.sync_db_path,
-                limit=3,
+                page_size=3,
+                max_pages=2,
                 bbl="2037710066",
             )
 
@@ -83,7 +85,11 @@ class RunnerTests(TestCase):
         )
 
         self.assertEqual(mock_fetch.call_count, 2)
-        mock_fetch.assert_called_with(3, bbl="2037710066")
+        mock_fetch.assert_called_with(
+            page_size=3,
+            max_pages=2,
+            bbl="2037710066",
+        )
         self.assertEqual(mock_send.call_count, 2)
 
         first_request, first_endpoint = mock_send.call_args_list[0].args
@@ -114,7 +120,7 @@ class RunnerTests(TestCase):
 
         with (
             patch(
-                "src.civicbridge.runner.fetch_complaints",
+                "src.civicbridge.runner.fetch_complaint_pages",
                 return_value=[record],
             ),
             patch(
@@ -142,7 +148,7 @@ class RunnerTests(TestCase):
     def test_empty_batch_returns_zero_counts(self):
         with (
             patch(
-                "src.civicbridge.runner.fetch_complaints",
+                "src.civicbridge.runner.fetch_complaint_pages",
                 return_value=[],
             ),
             patch(
@@ -169,7 +175,7 @@ class RunnerTests(TestCase):
 
     def test_successful_integration_run_is_recorded(self):
         with patch(
-            "src.civicbridge.runner.fetch_complaints",
+            "src.civicbridge.runner.fetch_complaint_pages",
             return_value=[],
         ):
             run_integration(
@@ -203,7 +209,7 @@ class RunnerTests(TestCase):
 
     def test_fetch_failure_is_recorded_and_reraised(self):
         with patch(
-            "src.civicbridge.runner.fetch_complaints",
+            "src.civicbridge.runner.fetch_complaint_pages",
             side_effect=RuntimeError("NYC 311 unavailable"),
         ):
             with self.assertRaisesRegex(

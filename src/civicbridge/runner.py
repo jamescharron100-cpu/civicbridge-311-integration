@@ -1,4 +1,4 @@
-from .nyc311_client import fetch_complaints
+from .nyc311_client import fetch_complaint_pages
 from .normalizer import normalize_complaint
 from .matcher import find_matching_property
 from .properties import PROPERTIES
@@ -7,7 +7,13 @@ from .soap_client import send_maintenance_request
 from .sync_store import initialize_sync_database, record_success, should_skip_record, start_run, finish_run
 
 
-def run_integration(endpoint_url: str, sync_db_path: str, limit: int = 10, bbl: str | None = None) -> dict[str, int]:
+def run_integration(
+    endpoint_url: str,
+    sync_db_path: str,
+    page_size: int = 100,
+    max_pages: int = 5,
+    bbl: str | None = None,
+) -> dict[str, int]:
     initialize_sync_database(sync_db_path)
 
     summary = {
@@ -20,7 +26,7 @@ def run_integration(endpoint_url: str, sync_db_path: str, limit: int = 10, bbl: 
 
     run_id = start_run(sync_db_path)
     try:
-        raw_complaints = fetch_complaints(limit, bbl=bbl)
+        raw_complaints = fetch_complaint_pages(page_size=page_size, max_pages=max_pages, bbl=bbl)
         summary["fetched"] = len(raw_complaints)
 
         for raw_complaint in raw_complaints:
@@ -52,7 +58,13 @@ def run_integration(endpoint_url: str, sync_db_path: str, limit: int = 10, bbl: 
 
 
 def main() -> None:
-    summary = run_integration("http://127.0.0.1:8000/soap", "civicbridge_sync.db", limit=10, bbl=PROPERTIES[0].bbl)
+    summary = run_integration(
+        "http://127.0.0.1:8000/soap",
+        "civicbridge_sync.db",
+        page_size=10,
+        max_pages=3,
+        bbl=PROPERTIES[0].bbl,
+    )
     print(summary)
 
 
