@@ -26,7 +26,7 @@ SOURCE_FIELDS = (
 )
 
 
-def fetch_complaints(limit: int = 10, bbl: str | None = None) -> list[dict[str, Any]]:
+def fetch_complaints(limit: int = 10, bbl: str | None = None, offset: int = 0) -> list[dict[str, Any]]:
     quoted_types = ", ".join(f"'{complaint_type}'" for complaint_type in SUPPORTED_COMPLAINT_TYPES)
     where_clause = f"complaint_type IN ({quoted_types})"
 
@@ -36,11 +36,17 @@ def fetch_complaints(limit: int = 10, bbl: str | None = None) -> list[dict[str, 
         else:
             raise ValueError("BBL must contain exactly 10 digits")
 
+    if limit <= 0:
+        raise ValueError("Limit must be greater than zero")
+    if offset < 0:
+        raise ValueError("Offset cannot be negative")
+
     params = {
         "$limit": limit,
-        "$order": "created_date DESC",
+        "$order": "created_date DESC, unique_key DESC",
         "$where": where_clause,
-        "$select": ", ".join(SOURCE_FIELDS)
+        "$select": ", ".join(SOURCE_FIELDS),
+        "$offset": offset,
     }
 
     response = requests.get(BASE_URL, params=params, timeout=10)
@@ -48,3 +54,26 @@ def fetch_complaints(limit: int = 10, bbl: str | None = None) -> list[dict[str, 
     data = response.json()
 
     return data
+
+
+def fetch_complaint_pages(
+    page_size: int = 100,
+    max_pages: int = 5,
+    bbl: str | None = None,
+) -> list[dict[str, Any]]:
+
+    if page_size <= 0:
+        raise ValueError("Page size must be greater than zero")
+    if max_pages <= 0:
+        raise ValueError("Max pages must be greater than zero")
+
+    complaints = []
+    for page_number in range(max_pages):
+        offset = page_number * page_size
+        page = fetch_complaints(limit=page_size, bbl=bbl, offset=offset)
+        complaints.extend(page)
+
+        if len(page) < page_size:
+            break
+
+    return complaints
