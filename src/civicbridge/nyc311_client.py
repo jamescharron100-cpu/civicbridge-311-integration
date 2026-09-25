@@ -1,8 +1,9 @@
-from typing import Any
-import requests
+import time
 from datetime import datetime
+from typing import Any
 from zoneinfo import ZoneInfo
 
+import requests
 
 BASE_URL = "https://data.cityofnewyork.us/resource/erm2-nwe9.json"
 
@@ -27,6 +28,17 @@ SOURCE_FIELDS = (
     "resolution_action_updated_date"
 )
 
+MAX_ATTEMPTS = 3
+RETRY_BACKOFF_SECONDS = 0.25
+RETRYABLE_STATUS_CODES = {
+    408,
+    429,
+    500,
+    502,
+    503,
+    504,
+}
+
 
 def fetch_complaints(
     limit: int = 10,
@@ -34,7 +46,7 @@ def fetch_complaints(
     offset: int = 0,
     updated_after: datetime | None = None,
 ) -> list[dict[str, Any]]:
-    
+
     quoted_types = ", ".join(f"'{complaint_type}'" for complaint_type in SUPPORTED_COMPLAINT_TYPES)
     where_clause = f"complaint_type IN ({quoted_types})"
 
@@ -48,7 +60,7 @@ def fetch_complaints(
         raise ValueError("Limit must be greater than zero")
     if offset < 0:
         raise ValueError("Offset cannot be negative")
-    
+
     if updated_after is not None:
         if updated_after.tzinfo is None or updated_after.utcoffset() is None:
             raise ValueError("Updated after must include timezone information")
@@ -74,8 +86,7 @@ def fetch_complaints(
         "$offset": offset,
     }
 
-    response = requests.get(BASE_URL, params=params, timeout=10)
-    response.raise_for_status()
+    response = get_with_retries(params)
     data = response.json()
 
     return data
@@ -103,3 +114,32 @@ def fetch_complaint_pages(
             break
 
     return complaints
+
+
+def get_with_retries(params: dict[str, Any], max_attempts: int = MAX_ATTEMPTS) -> requests.Response:
+    if max_attempts <= 0:
+        raise ValueError("Max attempts must be greater than zero")
+
+    for attempt_number in range(1, max_attempts + 1):
+        try:
+            response = requests.get(BASE_URL, params=params, timeout=10)
+            response.raise_for_status()
+            return response
+
+        except (requests.Timeout, requests.ConnectionError):
+            if attempt_number == max_attempts:
+                raise
+
+        except requests.HTTPError as error:
+            status_code = (
+                error.response.status_code
+                if error.response is not None
+                else None
+            )
+
+            if status_code not in RETRYABLE_STATUS_CODES or attempt_number == max_attempts:
+                raise
+
+        time.sleep(RETRY_BACKOFF_SECONDS * (2 ** (attempt_number - 1)))
+
+    raise RuntimeError("Retry loop exited unexpectedly")

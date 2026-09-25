@@ -1,10 +1,17 @@
-from .nyc311_client import fetch_complaint_pages
-from .normalizer import normalize_complaint
-from .matcher import find_matching_property
-from .properties import PROPERTIES
 from .mapper import map_complaint
+from .matcher import find_matching_property
+from .normalizer import normalize_complaint
+from .nyc311_client import fetch_complaint_pages
+from .properties import PROPERTIES
 from .soap_client import send_maintenance_request
-from .sync_store import initialize_sync_database, record_success, should_skip_record, start_run, finish_run, get_last_successful_run_started_at
+from .sync_store import (
+    finish_run,
+    get_last_successful_run_started_at,
+    initialize_sync_database,
+    record_success,
+    should_skip_record,
+    start_run,
+)
 
 
 def run_integration(

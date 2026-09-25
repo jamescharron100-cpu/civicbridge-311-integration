@@ -1,8 +1,15 @@
-from unittest import TestCase
-from unittest.mock import call, patch
 from datetime import datetime, timezone
+from unittest import TestCase
+from unittest.mock import Mock, call, patch
 
-from src.civicbridge.nyc311_client import (BASE_URL, SOURCE_FIELDS, fetch_complaints, fetch_complaint_pages)
+import requests
+from src.civicbridge.nyc311_client import (
+    BASE_URL,
+    SOURCE_FIELDS,
+    fetch_complaint_pages,
+    fetch_complaints,
+    get_with_retries,
+)
 
 
 class NYC311ClientTests(TestCase):
@@ -46,9 +53,14 @@ class NYC311ClientTests(TestCase):
     @patch("src.civicbridge.nyc311_client.requests.get")
     def test_rejects_invalid_bbl_before_http_request(self, mock_get):
         for bbl in ("", "123", "20377100667", "203771006X", "２０３７７１００６６"):
-            with self.subTest(bbl=bbl):
-                with self.assertRaisesRegex(ValueError, "BBL must contain exactly 10 digits"):
-                    fetch_complaints(bbl=bbl)
+            with (
+                self.subTest(bbl=bbl),
+                self.assertRaisesRegex(
+                    ValueError,
+                    "BBL must contain exactly 10 digits",
+                ),
+            ):
+                fetch_complaints(bbl=bbl)
 
         mock_get.assert_not_called()
 
@@ -76,20 +88,18 @@ class NYC311ClientTests(TestCase):
         mock_get,
     ):
         for limit in (0, -1):
-            with self.subTest(limit=limit):
-                with self.assertRaisesRegex(
-                    ValueError,
-                    "Limit must be greater than zero",
-                ):
-                    fetch_complaints(limit=limit)
+            with self.subTest(limit=limit), self.assertRaisesRegex(
+                ValueError,
+                "Limit must be greater than zero",
+            ):
+                fetch_complaints(limit=limit)
 
         for offset in (-1, -100):
-            with self.subTest(offset=offset):
-                with self.assertRaisesRegex(
-                    ValueError,
-                    "Offset cannot be negative",
-                ):
-                    fetch_complaints(offset=offset)
+            with self.subTest(offset=offset), self.assertRaisesRegex(
+                ValueError,
+                "Offset cannot be negative",
+            ):
+                fetch_complaints(offset=offset)
 
         mock_get.assert_not_called()
 
@@ -190,24 +200,22 @@ class NYC311ClientTests(TestCase):
         mock_fetch,
     ):
         for page_size in (0, -1):
-            with self.subTest(page_size=page_size):
-                with self.assertRaisesRegex(
-                    ValueError,
-                    "Page size must be greater than zero",
-                ):
-                    fetch_complaint_pages(
-                        page_size=page_size,
-                    )
+            with self.subTest(page_size=page_size), self.assertRaisesRegex(
+                ValueError,
+                "Page size must be greater than zero",
+            ):
+                fetch_complaint_pages(
+                    page_size=page_size,
+                )
 
         for max_pages in (0, -1):
-            with self.subTest(max_pages=max_pages):
-                with self.assertRaisesRegex(
-                    ValueError,
-                    "Max pages must be greater than zero",
-                ):
-                    fetch_complaint_pages(
-                        max_pages=max_pages,
-                    )
+            with self.subTest(max_pages=max_pages), self.assertRaisesRegex(
+                ValueError,
+                "Max pages must be greater than zero",
+            ):
+                fetch_complaint_pages(
+                    max_pages=max_pages,
+                )
 
         mock_fetch.assert_not_called()
 
@@ -250,7 +258,123 @@ class NYC311ClientTests(TestCase):
             "Updated after must include timezone information",
         ):
             fetch_complaints(
-                updated_after=datetime(2026, 9, 24, 13, 30)
+                updated_after=datetime(2026, 9, 24, 13, 30)  # noqa: DTZ001
+            )
+
+        mock_get.assert_not_called()
+
+
+    @patch("src.civicbridge.nyc311_client.time.sleep")
+    @patch("src.civicbridge.nyc311_client.requests.get")
+    def test_retries_timeout_then_succeeds(
+        self,
+        mock_get,
+        mock_sleep,
+    ):
+        successful_response = Mock()
+        mock_get.side_effect = [
+            requests.Timeout("Request timed out"),
+            successful_response,
+        ]
+
+        result = get_with_retries({"$limit": 10})
+
+        self.assertIs(result, successful_response)
+        self.assertEqual(mock_get.call_count, 2)
+        successful_response.raise_for_status.assert_called_once_with()
+        mock_sleep.assert_called_once_with(0.25)
+
+
+    @patch("src.civicbridge.nyc311_client.time.sleep")
+    @patch("src.civicbridge.nyc311_client.requests.get")
+    def test_retries_retryable_http_error_then_succeeds(
+        self,
+        mock_get,
+        mock_sleep,
+    ):
+        temporary_response = Mock(status_code=503)
+        temporary_response.raise_for_status.side_effect = (
+            requests.HTTPError(
+                "Service unavailable",
+                response=temporary_response,
+            )
+        )
+        successful_response = Mock()
+
+        mock_get.side_effect = [
+            temporary_response,
+            successful_response,
+        ]
+
+        result = get_with_retries({"$limit": 10})
+
+        self.assertIs(result, successful_response)
+        self.assertEqual(mock_get.call_count, 2)
+        mock_sleep.assert_called_once_with(0.25)
+
+
+    @patch("src.civicbridge.nyc311_client.time.sleep")
+    @patch("src.civicbridge.nyc311_client.requests.get")
+    def test_does_not_retry_non_retryable_http_error(
+        self,
+        mock_get,
+        mock_sleep,
+    ):
+        bad_response = Mock(status_code=400)
+        bad_response.raise_for_status.side_effect = (
+            requests.HTTPError(
+                "Bad request",
+                response=bad_response,
+            )
+        )
+        mock_get.return_value = bad_response
+
+        with self.assertRaises(requests.HTTPError):
+            get_with_retries({"$limit": 10})
+
+        mock_get.assert_called_once()
+        mock_sleep.assert_not_called()
+
+
+    @patch("src.civicbridge.nyc311_client.time.sleep")
+    @patch("src.civicbridge.nyc311_client.requests.get")
+    def test_raises_after_exhausting_retry_attempts(
+        self,
+        mock_get,
+        mock_sleep,
+    ):
+        mock_get.side_effect = requests.ConnectionError(
+            "Connection failed"
+        )
+
+        with self.assertRaises(requests.ConnectionError):
+            get_with_retries(
+                {"$limit": 10},
+                max_attempts=3,
+            )
+
+        self.assertEqual(mock_get.call_count, 3)
+        self.assertEqual(
+            mock_sleep.call_args_list,
+            [
+                call(0.25),
+                call(0.5),
+            ],
+        )
+
+
+    @patch("src.civicbridge.nyc311_client.requests.get")
+    def test_rejects_invalid_retry_attempt_count(
+        self,
+        mock_get,
+    ):
+        with self.assertRaisesRegex(
+            ValueError,
+            "Max attempts must be greater than zero",
+        ):
+            get_with_retries(
+                {"$limit": 10},
+                max_attempts=0,
             )
 
         mock_get.assert_not_called()
