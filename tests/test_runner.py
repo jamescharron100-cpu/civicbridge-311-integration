@@ -1,13 +1,15 @@
 import sqlite3
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest import TestCase
 from unittest.mock import patch
 
-from src.civicbridge.models import MaintenanceRequest
 from src.civicbridge.runner import run_integration
-from src.civicbridge.sync_store import should_skip_record, get_last_successful_run_started_at
+from src.civicbridge.sync_store import (
+    get_last_successful_run_started_at,
+    should_skip_record,
+)
 
 
 def raw_complaint(source_id, bbl):
@@ -39,6 +41,10 @@ class RunnerTests(TestCase):
         endpoint = "http://127.0.0.1:8000/soap"
 
         with (
+            self.assertLogs(
+                "src.civicbridge.runner",
+                level="INFO",
+            ) as captured_logs,
             patch(
                 "src.civicbridge.runner.fetch_complaint_pages",
                 return_value=records,
@@ -56,7 +62,9 @@ class RunnerTests(TestCase):
                 bbl="2037710066",
             )
 
-            first_checkpoint = get_last_successful_run_started_at(self.sync_db_path)
+            first_checkpoint = get_last_successful_run_started_at(
+                self.sync_db_path
+            )
 
             second_summary = run_integration(
                 endpoint,
@@ -65,6 +73,22 @@ class RunnerTests(TestCase):
                 max_pages=2,
                 bbl="2037710066",
             )
+        logs = "\n".join(captured_logs.output)
+
+        self.assertIn("event=integration_run_started", logs)
+        self.assertIn("event=complaints_fetched", logs)
+
+        self.assertIn("event=complaint_unmatched", logs)
+        self.assertIn("source_id=UNMATCHED-001", logs)
+
+        self.assertIn("event=complaint_synchronized", logs)
+        self.assertIn("source_id=MATCHED-001", logs)
+        self.assertIn("result=CREATED", logs)
+        self.assertIn("source_id=MATCHED-002", logs)
+        self.assertIn("result=UPDATED", logs)
+
+        self.assertIn("event=complaint_skipped", logs)
+        self.assertIn("event=integration_run_succeeded", logs)
 
         self.assertEqual(
             first_summary,
@@ -88,6 +112,7 @@ class RunnerTests(TestCase):
         )
 
         self.assertEqual(mock_fetch.call_count, 2)
+        self.assertEqual(mock_send.call_count, 2)
         self.assertIsNotNone(first_checkpoint)
 
         self.assertEqual(
@@ -123,22 +148,21 @@ class RunnerTests(TestCase):
             patch(
                 "src.civicbridge.runner.send_maintenance_request",
                 side_effect=RuntimeError("SOAP unavailable"),
-            ),
+            ),self.assertRaisesRegex(
+            RuntimeError,
+            "SOAP unavailable",
+        )
         ):
-            with self.assertRaisesRegex(
-                RuntimeError,
-                "SOAP unavailable",
-            ):
-                run_integration(
-                    "http://127.0.0.1:8000/soap",
-                    self.sync_db_path,
-                )
+            run_integration(
+                "http://127.0.0.1:8000/soap",
+                self.sync_db_path,
+            )
 
         self.assertFalse(
             should_skip_record(
                 self.sync_db_path,
                 "MATCHED-003",
-                datetime(2026, 9, 16),
+                datetime(2026, 9, 16, tzinfo=timezone.utc),
             )
         )
 
@@ -208,16 +232,21 @@ class RunnerTests(TestCase):
         with patch(
             "src.civicbridge.runner.fetch_complaint_pages",
             side_effect=RuntimeError("NYC 311 unavailable"),
-        ):
-            with self.assertRaisesRegex(
-                RuntimeError,
-                "NYC 311 unavailable",
-            ):
-                run_integration(
-                    "http://127.0.0.1:8000/soap",
-                    self.sync_db_path,
-                )
+        ), self.assertRaisesRegex(
+            RuntimeError,
+            "NYC 311 unavailable",
+        ), self.assertLogs(
+            "src.civicbridge.runner",
+            level="ERROR",
+        ) as captured_logs:
+            run_integration(
+                "http://127.0.0.1:8000/soap",
+                self.sync_db_path,
+            )
+        logs = "\n".join(captured_logs.output)
 
+        self.assertIn("event=integration_run_failed", logs)
+        self.assertIn("error_type=RuntimeError", logs)
         conn = sqlite3.connect(self.sync_db_path)
         try:
             row = conn.execute(
