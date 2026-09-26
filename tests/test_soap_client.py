@@ -227,11 +227,23 @@ class SoapClientTests(TestCase):
             successful_response,
         ]
 
-        result = post_with_retries(
-            "http://localhost:8000/soap",
-            b"<soap-request />",
-            {"Content-Type": "text/xml"},
-        )
+        with self.assertLogs(
+            "src.civicbridge.soap_client",
+            level="WARNING",
+        ) as captured_logs:
+            result = post_with_retries(
+                "http://localhost:8000/soap",
+                b"<soap-request />",
+                {"Content-Type": "text/xml"},
+            )
+
+        logs = "\n".join(captured_logs.output)
+
+        self.assertIn("event=soap_request_retry", logs)
+        self.assertIn("attempt=1", logs)
+        self.assertIn("max_attempts=3", logs)
+        self.assertIn("error_type=Timeout", logs)
+        self.assertIn("delay_seconds=0.25", logs)
 
         self.assertIs(result, successful_response)
         self.assertEqual(mock_post.call_count, 2)
@@ -249,13 +261,46 @@ class SoapClientTests(TestCase):
             "Connection failed"
         )
 
-        with self.assertRaises(requests.ConnectionError):
+        with (
+            self.assertLogs(
+                "src.civicbridge.soap_client",
+                level="WARNING",
+            ) as captured_logs,
+            self.assertRaises(requests.ConnectionError),
+        ):
             post_with_retries(
                 "http://localhost:8000/soap",
                 b"<soap-request />",
                 {"Content-Type": "text/xml"},
                 max_attempts=3,
             )
+        self.assertEqual(len(captured_logs.output), 2)
+
+        self.assertIn(
+            "attempt=1 max_attempts=3",
+            captured_logs.output[0],
+        )
+        self.assertIn(
+            "error_type=ConnectionError",
+            captured_logs.output[0],
+        )
+        self.assertIn(
+            "delay_seconds=0.25",
+            captured_logs.output[0],
+        )
+
+        self.assertIn(
+            "attempt=2 max_attempts=3",
+            captured_logs.output[1],
+        )
+        self.assertIn(
+            "error_type=ConnectionError",
+            captured_logs.output[1],
+        )
+        self.assertIn(
+            "delay_seconds=0.5",
+            captured_logs.output[1],
+        )
 
         self.assertEqual(mock_post.call_count, 3)
         self.assertEqual(

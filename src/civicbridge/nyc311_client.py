@@ -1,3 +1,4 @@
+import logging
 import time
 from datetime import datetime
 from typing import Any
@@ -5,6 +6,7 @@ from zoneinfo import ZoneInfo
 
 import requests
 
+logger = logging.getLogger(__name__)
 BASE_URL = "https://data.cityofnewyork.us/resource/erm2-nwe9.json"
 
 SUPPORTED_COMPLAINT_TYPES = (
@@ -121,14 +123,17 @@ def get_with_retries(params: dict[str, Any], max_attempts: int = MAX_ATTEMPTS) -
         raise ValueError("Max attempts must be greater than zero")
 
     for attempt_number in range(1, max_attempts + 1):
+        status_code = None
         try:
             response = requests.get(BASE_URL, params=params, timeout=10)
             response.raise_for_status()
             return response
 
-        except (requests.Timeout, requests.ConnectionError):
+        except (requests.Timeout, requests.ConnectionError) as error:
             if attempt_number == max_attempts:
                 raise
+
+            error_type = type(error).__name__
 
         except requests.HTTPError as error:
             status_code = (
@@ -137,9 +142,29 @@ def get_with_retries(params: dict[str, Any], max_attempts: int = MAX_ATTEMPTS) -
                 else None
             )
 
-            if status_code not in RETRYABLE_STATUS_CODES or attempt_number == max_attempts:
+            if (
+                status_code not in RETRYABLE_STATUS_CODES
+                or attempt_number == max_attempts
+            ):
                 raise
 
-        time.sleep(RETRY_BACKOFF_SECONDS * (2 ** (attempt_number - 1)))
+            error_type = type(error).__name__
+
+        delay_seconds = RETRY_BACKOFF_SECONDS * (
+            2 ** (attempt_number - 1)
+        )
+
+        logger.warning(
+            "event=nyc311_request_retry "
+            "attempt=%s max_attempts=%s error_type=%s "
+            "status_code=%s delay_seconds=%s",
+            attempt_number,
+            max_attempts,
+            error_type,
+            status_code,
+            delay_seconds,
+        )
+
+        time.sleep(delay_seconds)
 
     raise RuntimeError("Retry loop exited unexpectedly")

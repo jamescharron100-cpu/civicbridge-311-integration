@@ -1,9 +1,12 @@
+import logging
 import time
 import xml.etree.ElementTree as ET
 
 import requests
 
 from .models import MaintenanceRequest
+
+logger = logging.getLogger(__name__)
 
 SOAP_NS = "http://schemas.xmlsoap.org/soap/envelope/"
 CIVICBRIDGE_NS = "urn:civicbridge:maintenance"
@@ -90,10 +93,24 @@ def post_with_retries(
             response = requests.post(endpoint_url, data=xml_bytes, headers=headers, timeout=10)
             return response
 
-        except (requests.Timeout, requests.ConnectionError):
+        except (requests.Timeout, requests.ConnectionError) as error:
             if attempt_number == max_attempts:
                 raise
 
-        time.sleep(SOAP_RETRY_BACKOFF_SECONDS * (2 ** (attempt_number - 1)))
+            delay_seconds = SOAP_RETRY_BACKOFF_SECONDS * (
+                2 ** (attempt_number - 1)
+            )
+
+            logger.warning(
+                "event=soap_request_retry "
+                "attempt=%s max_attempts=%s error_type=%s "
+                "delay_seconds=%s",
+                attempt_number,
+                max_attempts,
+                type(error).__name__,
+                delay_seconds,
+            )
+
+            time.sleep(delay_seconds)
 
     raise RuntimeError("SOAP retry loop exited unexpectedly")

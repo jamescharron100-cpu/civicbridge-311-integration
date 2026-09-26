@@ -277,7 +277,20 @@ class NYC311ClientTests(TestCase):
             successful_response,
         ]
 
-        result = get_with_retries({"$limit": 10})
+        with self.assertLogs(
+            "src.civicbridge.nyc311_client",
+            level="WARNING",
+        ) as captured_logs:
+            result = get_with_retries({"$limit": 10})
+
+        logs = "\n".join(captured_logs.output)
+
+        self.assertIn("event=nyc311_request_retry", logs)
+        self.assertIn("attempt=1", logs)
+        self.assertIn("max_attempts=3", logs)
+        self.assertIn("error_type=Timeout", logs)
+        self.assertIn("status_code=None", logs)
+        self.assertIn("delay_seconds=0.25", logs)
 
         self.assertIs(result, successful_response)
         self.assertEqual(mock_get.call_count, 2)
@@ -306,7 +319,20 @@ class NYC311ClientTests(TestCase):
             successful_response,
         ]
 
-        result = get_with_retries({"$limit": 10})
+        with self.assertLogs(
+            "src.civicbridge.nyc311_client",
+            level="WARNING",
+        ) as captured_logs:
+            result = get_with_retries({"$limit": 10})
+
+        logs = "\n".join(captured_logs.output)
+
+        self.assertIn("event=nyc311_request_retry", logs)
+        self.assertIn("attempt=1", logs)
+        self.assertIn("max_attempts=3", logs)
+        self.assertIn("error_type=HTTPError", logs)
+        self.assertIn("status_code=503", logs)
+        self.assertIn("delay_seconds=0.25", logs)
 
         self.assertIs(result, successful_response)
         self.assertEqual(mock_get.call_count, 2)
@@ -347,11 +373,42 @@ class NYC311ClientTests(TestCase):
             "Connection failed"
         )
 
-        with self.assertRaises(requests.ConnectionError):
+        with self.assertLogs(
+            "src.civicbridge.nyc311_client",
+            level="WARNING",
+        ) as captured_logs, self.assertRaises(requests.ConnectionError):
             get_with_retries(
                 {"$limit": 10},
                 max_attempts=3,
             )
+
+        self.assertEqual(len(captured_logs.output), 2)
+
+        self.assertIn(
+            "attempt=1 max_attempts=3",
+            captured_logs.output[0],
+        )
+        self.assertIn(
+            "error_type=ConnectionError",
+            captured_logs.output[0],
+        )
+        self.assertIn(
+            "delay_seconds=0.25",
+            captured_logs.output[0],
+        )
+
+        self.assertIn(
+            "attempt=2 max_attempts=3",
+            captured_logs.output[1],
+        )
+        self.assertIn(
+            "error_type=ConnectionError",
+            captured_logs.output[1],
+        )
+        self.assertIn(
+            "delay_seconds=0.5",
+            captured_logs.output[1],
+        )
 
         self.assertEqual(mock_get.call_count, 3)
         self.assertEqual(
