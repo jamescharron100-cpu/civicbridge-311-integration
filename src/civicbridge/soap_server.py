@@ -1,7 +1,8 @@
 import xml.etree.ElementTree as ET
 from http.server import BaseHTTPRequestHandler, HTTPServer
-from .soap_client import SOAP_NS, CIVICBRIDGE_NS
+
 from .case_store import initialize_database, upsert_case
+from .soap_client import CIVICBRIDGE_NS, SOAP_NS
 
 
 def parse_maintenance_request(xml_bytes: bytes) -> dict[str, str]:

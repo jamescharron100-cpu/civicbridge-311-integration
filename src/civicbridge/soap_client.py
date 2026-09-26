@@ -1,13 +1,20 @@
-import requests
+import time
 import xml.etree.ElementTree as ET
+
+import requests
 
 from .models import MaintenanceRequest
 
 SOAP_NS = "http://schemas.xmlsoap.org/soap/envelope/"
 CIVICBRIDGE_NS = "urn:civicbridge:maintenance"
+SOAP_MAX_ATTEMPTS = 3
+SOAP_RETRY_BACKOFF_SECONDS = 0.25
 
 ET.register_namespace("soap", SOAP_NS)
 ET.register_namespace("cb", CIVICBRIDGE_NS)
+
+class SoapFaultError(ValueError):
+    pass
 
 
 def build_soap_envelope(request: MaintenanceRequest) -> bytes:
@@ -39,7 +46,7 @@ def parse_soap_response(xml_bytes: bytes) -> str:
 
     fault = body.find(f"{{{SOAP_NS}}}Fault")
     if fault is not None:
-        raise ValueError(fault.findtext("faultstring") or "Unknown SOAP fault")
+        raise SoapFaultError(fault.findtext("faultstring") or "Unknown SOAP fault")
 
     response = body.find(f"{{{CIVICBRIDGE_NS}}}UpsertMaintenanceRequestResponse")
     if response is None:
@@ -60,9 +67,33 @@ def send_maintenance_request(request: MaintenanceRequest, endpoint_url: str) -> 
         "SOAPAction": '"urn:civicbridge:maintenance:UpsertMaintenanceRequest"'
     }
 
-    response = requests.post(endpoint_url, data=xml_bytes, headers=headers, timeout=10)
+    response = post_with_retries(endpoint_url, xml_bytes, headers)
 
     result = parse_soap_response(response.content)
     response.raise_for_status()
 
     return result
+
+
+def post_with_retries(
+    endpoint_url: str,
+    xml_bytes: bytes,
+    headers: dict[str, str],
+    max_attempts: int = SOAP_MAX_ATTEMPTS,
+) -> requests.Response:
+
+    if max_attempts <= 0:
+        raise ValueError("Max attempts must be greater than zero")
+
+    for attempt_number in range(1, max_attempts + 1):
+        try:
+            response = requests.post(endpoint_url, data=xml_bytes, headers=headers, timeout=10)
+            return response
+
+        except (requests.Timeout, requests.ConnectionError):
+            if attempt_number == max_attempts:
+                raise
+
+        time.sleep(SOAP_RETRY_BACKOFF_SECONDS * (2 ** (attempt_number - 1)))
+
+    raise RuntimeError("SOAP retry loop exited unexpectedly")

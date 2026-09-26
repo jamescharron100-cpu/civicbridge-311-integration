@@ -1,10 +1,19 @@
 import xml.etree.ElementTree as ET
-from datetime import datetime
+from datetime import datetime, timezone
 from unittest import TestCase
-from unittest.mock import Mock, patch
+from unittest.mock import Mock, call, patch
 
+import requests
 from src.civicbridge.models import MaintenanceRequest
-from src.civicbridge.soap_client import (CIVICBRIDGE_NS, SOAP_NS, build_soap_envelope, parse_soap_response, send_maintenance_request)
+from src.civicbridge.soap_client import (
+    CIVICBRIDGE_NS,
+    SOAP_NS,
+    SoapFaultError,
+    build_soap_envelope,
+    parse_soap_response,
+    post_with_retries,
+    send_maintenance_request,
+)
 
 
 class SoapClientTests(TestCase):
@@ -16,8 +25,8 @@ class SoapClientTests(TestCase):
             priority="HIGH",
             status="OPEN",
             description="Heat & hot water",
-            reported_at=datetime(2026, 9, 16),
-            source_updated_at=datetime(2026, 9, 16)
+            reported_at=datetime(2026, 9, 16, tzinfo=timezone.utc),
+            source_updated_at=datetime(2026, 9, 16, tzinfo=timezone.utc)
         )
 
         xml_bytes = build_soap_envelope(request)
@@ -119,8 +128,8 @@ class SoapClientTests(TestCase):
             priority="HIGH",
             status="OPEN",
             description="Heat & hot water",
-            reported_at=datetime(2026, 9, 16),
-            source_updated_at=datetime(2026, 9, 16)
+            reported_at=datetime(2026, 9, 16, tzinfo=timezone.utc),
+            source_updated_at=datetime(2026, 9, 16, tzinfo=timezone.utc)
         )
 
         xml_bytes = b"""
@@ -168,8 +177,8 @@ class SoapClientTests(TestCase):
             priority="HIGH",
             status="OPEN",
             description="Heat & hot water",
-            reported_at=datetime(2026, 9, 16),
-            source_updated_at=datetime(2026, 9, 16)
+            reported_at=datetime(2026, 9, 16, tzinfo=timezone.utc),
+            source_updated_at=datetime(2026, 9, 16, tzinfo=timezone.utc)
         )
 
         xml_bytes = b"""
@@ -187,13 +196,91 @@ class SoapClientTests(TestCase):
         mock_response = Mock()
         mock_response.content = xml_bytes
 
-        with patch(
-            "src.civicbridge.soap_client.requests.post",
-            return_value=mock_response,
+        with (
+            patch(
+                "src.civicbridge.soap_client.requests.post",
+                return_value=mock_response,
+            ) as mock_post,
+            self.assertRaisesRegex(
+                SoapFaultError,
+                "Unknown property ID",
+            ),
         ):
-            with self.assertRaisesRegex(ValueError, "Unknown property ID"):
-                send_maintenance_request(
-                    request, "http://localhost:8000/soap"
-                )
+            send_maintenance_request(
+                request,
+                "http://localhost:8000/soap",
+            )
 
+        mock_post.assert_called_once()
         mock_response.raise_for_status.assert_not_called()
+
+    @patch("src.civicbridge.soap_client.time.sleep")
+    @patch("src.civicbridge.soap_client.requests.post")
+    def test_retries_timeout_then_succeeds(
+        self,
+        mock_post,
+        mock_sleep,
+    ):
+        successful_response = Mock()
+        mock_post.side_effect = [
+            requests.Timeout("Request timed out"),
+            successful_response,
+        ]
+
+        result = post_with_retries(
+            "http://localhost:8000/soap",
+            b"<soap-request />",
+            {"Content-Type": "text/xml"},
+        )
+
+        self.assertIs(result, successful_response)
+        self.assertEqual(mock_post.call_count, 2)
+        mock_sleep.assert_called_once_with(0.25)
+
+
+    @patch("src.civicbridge.soap_client.time.sleep")
+    @patch("src.civicbridge.soap_client.requests.post")
+    def test_raises_after_exhausting_soap_retries(
+        self,
+        mock_post,
+        mock_sleep,
+    ):
+        mock_post.side_effect = requests.ConnectionError(
+            "Connection failed"
+        )
+
+        with self.assertRaises(requests.ConnectionError):
+            post_with_retries(
+                "http://localhost:8000/soap",
+                b"<soap-request />",
+                {"Content-Type": "text/xml"},
+                max_attempts=3,
+            )
+
+        self.assertEqual(mock_post.call_count, 3)
+        self.assertEqual(
+            mock_sleep.call_args_list,
+            [
+                call(0.25),
+                call(0.5),
+            ],
+        )
+
+
+    @patch("src.civicbridge.soap_client.requests.post")
+    def test_rejects_invalid_soap_retry_attempt_count(
+        self,
+        mock_post,
+    ):
+        with self.assertRaisesRegex(
+            ValueError,
+            "Max attempts must be greater than zero",
+        ):
+            post_with_retries(
+                "http://localhost:8000/soap",
+                b"<soap-request />",
+                {"Content-Type": "text/xml"},
+                max_attempts=0,
+            )
+
+        mock_post.assert_not_called()
