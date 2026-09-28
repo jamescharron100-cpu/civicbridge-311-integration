@@ -1,16 +1,16 @@
 import sqlite3
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest import TestCase
 
 from src.civicbridge.sync_store import (
+    finish_run,
+    get_last_successful_run_started_at,
     initialize_sync_database,
     record_success,
     should_skip_record,
     start_run,
-    finish_run,
-    get_last_successful_run_started_at,
 )
 
 
@@ -24,7 +24,7 @@ class SyncStoreTests(TestCase):
 
     def test_skip_decision_uses_last_successful_source_timestamp(self):
         source_id = "TEST-001"
-        original_timestamp = datetime(2026, 9, 19, 12, 0)
+        original_timestamp = datetime(2026, 9, 19, 12, 0, tzinfo=timezone.utc)
 
         self.assertFalse(
             should_skip_record(
@@ -52,14 +52,14 @@ class SyncStoreTests(TestCase):
             should_skip_record(
                 self.db_path,
                 source_id,
-                datetime(2026, 9, 19, 11, 0),
+                datetime(2026, 9, 19, 11, 0, tzinfo=timezone.utc),
             )
         )
         self.assertFalse(
             should_skip_record(
                 self.db_path,
                 source_id,
-                datetime(2026, 9, 19, 13, 0),
+                datetime(2026, 9, 19, 13, 0, tzinfo=timezone.utc),
             )
         )
 
@@ -69,13 +69,13 @@ class SyncStoreTests(TestCase):
         record_success(
             self.db_path,
             source_id,
-            datetime(2026, 9, 19, 12, 0),
+            datetime(2026, 9, 19, 12, 0, tzinfo=timezone.utc),
             "CREATED",
         )
         record_success(
             self.db_path,
             source_id,
-            datetime(2026, 9, 19, 13, 0),
+            datetime(2026, 9, 19, 13, 0, tzinfo=timezone.utc),
             "UPDATED",
         )
 
@@ -96,7 +96,7 @@ class SyncStoreTests(TestCase):
 
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0][0], source_id)
-        self.assertEqual(rows[0][1], "2026-09-19T13:00:00")
+        self.assertEqual(rows[0][1], "2026-09-19T13:00:00+00:00")
         self.assertEqual(rows[0][2], "UPDATED")
 
         synced_at = datetime.fromisoformat(rows[0][3])

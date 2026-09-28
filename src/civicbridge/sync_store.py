@@ -1,6 +1,7 @@
 import sqlite3
 from datetime import datetime, timezone
 
+
 def initialize_sync_database(db_path: str) -> None:
     conn = sqlite3.connect(db_path)
     try:

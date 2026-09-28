@@ -1,16 +1,24 @@
 import sqlite3
 from dataclasses import replace
+from datetime import datetime, timezone
 from pathlib import Path
 from tempfile import TemporaryDirectory
-
-from datetime import datetime
-from unittest import TestCase
 from threading import Thread
-
+from unittest import TestCase
 
 from src.civicbridge.models import MaintenanceRequest
-from src.civicbridge.soap_client import build_soap_envelope, parse_soap_response, send_maintenance_request
-from src.civicbridge.soap_server import parse_maintenance_request, build_soap_response, build_soap_fault, SoapHTTPServer, SoapRequestHandler
+from src.civicbridge.soap_client import (
+    build_soap_envelope,
+    parse_soap_response,
+    send_maintenance_request,
+)
+from src.civicbridge.soap_server import (
+    SoapHTTPServer,
+    SoapRequestHandler,
+    build_soap_fault,
+    build_soap_response,
+    parse_maintenance_request,
+)
 
 
 class SoapServerTests(TestCase):
@@ -22,8 +30,8 @@ class SoapServerTests(TestCase):
             priority="HIGH",
             status="OPEN",
             description="Heat & hot water",
-            reported_at=datetime(2026, 9, 16),
-            source_updated_at=datetime(2026, 9, 16)
+            reported_at=datetime(2026, 9, 16, tzinfo=timezone.utc),
+            source_updated_at=datetime(2026, 9, 16, tzinfo=timezone.utc)
         )
 
         fields = parse_maintenance_request(build_soap_envelope(request))
@@ -37,8 +45,8 @@ class SoapServerTests(TestCase):
                 "Priority": "HIGH",
                 "Status": "OPEN",
                 "Description": "Heat & hot water",
-                "ReportedAt": "2026-09-16T00:00:00",
-                "SourceUpdatedAt": "2026-09-16T00:00:00",
+                "ReportedAt": "2026-09-16T00:00:00+00:00",
+                "SourceUpdatedAt": "2026-09-16T00:00:00+00:00",
             },
         )
 
@@ -83,8 +91,8 @@ class SoapServerTests(TestCase):
             priority="HIGH",
             status="OPEN",
             description="Heat & hot water",
-            reported_at=datetime(2026, 9, 16),
-            source_updated_at=datetime(2026, 9, 16),
+            reported_at=datetime(2026, 9, 16, tzinfo=timezone.utc),
+            source_updated_at=datetime(2026, 9, 16, tzinfo=timezone.utc),
         )
 
         with TemporaryDirectory() as temp_dir:
@@ -117,7 +125,7 @@ class SoapServerTests(TestCase):
                 request = replace(
                     request,
                     description="Updated heating complaint",
-                    source_updated_at=datetime(2026, 9, 18),
+                    source_updated_at=datetime(2026, 9, 18, tzinfo=timezone.utc),
                 )
 
             conn = sqlite3.connect(db_path)
@@ -137,7 +145,7 @@ class SoapServerTests(TestCase):
                     (
                         "HTTP-TEST-001",
                         "Updated heating complaint",
-                        "2026-09-18T00:00:00",
+                        "2026-09-18T00:00:00+00:00",
                     )
                 ],
             )

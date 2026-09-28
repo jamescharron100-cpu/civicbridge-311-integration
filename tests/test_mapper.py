@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 from unittest import TestCase
 
 from src.civicbridge.mapper import map_complaint
@@ -10,11 +10,11 @@ class MapperTests(TestCase):
     def test_maps_heat_complaint(self):
         complaint = Complaint(
             source_id="TEST-001",
-            created_at=datetime(2026, 9, 16),
+            created_at=datetime(2026, 9, 16, tzinfo=timezone.utc),
             agency="HPD",
             complaint_type="HEAT/HOT WATER",
             status="Open",
-            source_updated_at=datetime(2026, 9, 16),
+            source_updated_at=datetime(2026, 9, 16, tzinfo=timezone.utc),
             descriptor="ENTIRE BUILDING"
         )
 
@@ -33,11 +33,11 @@ class MapperTests(TestCase):
     def test_maps_complaint_without_descriptor(self):
         complaint = Complaint(
             source_id="TEST-002",
-            created_at=datetime(2026, 9, 16),
+            created_at=datetime(2026, 9, 16, tzinfo=timezone.utc),
             agency="HPD",
             complaint_type="PLUMBING",
             status="Open",
-            source_updated_at=datetime(2026, 9, 16),
+            source_updated_at=datetime(2026, 9, 16, tzinfo=timezone.utc),
         )
 
         request = map_complaint(complaint, PROPERTIES[0])
@@ -55,11 +55,11 @@ class MapperTests(TestCase):
     def test_maps_closed_elevator_complaint(self):
         complaint = Complaint(
             source_id="TEST-003",
-            created_at=datetime(2026, 9, 16),
+            created_at=datetime(2026, 9, 16, tzinfo=timezone.utc),
             agency="HPD",
             complaint_type="ELEVATOR",
             status="Closed",
-            source_updated_at=datetime(2026, 9, 16),
+            source_updated_at=datetime(2026, 9, 16, tzinfo=timezone.utc),
         )
 
         request = map_complaint(complaint, PROPERTIES[0])
@@ -77,11 +77,11 @@ class MapperTests(TestCase):
     def test_rejects_unsupported_complaint_type(self):
         complaint = Complaint(
             source_id="TEST-004",
-            created_at=datetime(2026, 9, 16),
+            created_at=datetime(2026, 9, 16, tzinfo=timezone.utc),
             agency="HPD",
             complaint_type="NOISE",
             status="Open",
-            source_updated_at=datetime(2026, 9, 16),
+            source_updated_at=datetime(2026, 9, 16, tzinfo=timezone.utc),
         )
 
         with self.assertRaises(ValueError):
@@ -91,11 +91,11 @@ class MapperTests(TestCase):
     def test_rejects_unsupported_status(self):
         complaint = Complaint(
             source_id="TEST-005",
-            created_at=datetime(2026, 9, 16),
+            created_at=datetime(2026, 9, 16, tzinfo=timezone.utc),
             agency="HPD",
             complaint_type="PLUMBING",
             status="Pending",
-            source_updated_at=datetime(2026, 9, 16),
+            source_updated_at=datetime(2026, 9, 16, tzinfo=timezone.utc),
         )
 
         with self.assertRaises(ValueError):

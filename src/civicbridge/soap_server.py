@@ -64,7 +64,7 @@ class SoapRequestHandler(BaseHTTPRequestHandler):
     def send_xml_response(self, status_code: int, xml_bytes:bytes) -> None:
         self.send_response(status_code)
 
-        self.send_header("Content-Type", "text/xml; chatset=utf-8")
+        self.send_header("Content-Type", "text/xml; charset=utf-8")
         self.send_header("Content-Length", str(len(xml_bytes)))
         self.end_headers()
 
