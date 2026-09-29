@@ -103,8 +103,8 @@ The only third-party runtime dependency is `requests`. SOAP/XML and SQLite suppo
 ## Installation
 
 ```bash
-git clone <repository-url>
-cd civicbridge_311_integration
+git clone https://github.com/jamescharron100-cpu/civicbridge-311-integration.git
+cd civicbridge-311-integration
 
 python3 -m venv .venv
 source .venv/bin/activate
